@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dilapidation Survey Pro</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Utility Functions
+        const formatDate = (date) => {
+            return new Date(date).toLocaleDateString('en-AU', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        };
+
+        const generateReportId = () => {
+            return 'DR-' + Date.now().toString(36).toUpperCase();
+        };
+
+        // Main App Component
+        function DilapidationApp() {
+            const [currentView, setCurrentView] = useState('dashboard');
+            const [reports, setReports] = useState([]);
+            const [tasks, setTasks] = useState([]);
+            const [currentReport, setCurrentReport] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                loadData();
+            }, []);
+
+            const loadData = async () => {
+                try {
+                    const reportsResult = await window.storage.get('dilapidation-reports');
+                    const tasksResult = await window.storage.get('dilapidation-tasks');
+                    
+                    if (reportsResult?.value) {
+                        setReports(JSON.parse(reportsResult.value));
+                    }
+                    if (tasksResult?.value) {
+                        setTasks(JSON.parse(tasksResult.value));
+                    }
+                } catch (error) {
+                    console.log('No existing data found, starting fresh');
+                }
+                setLoading(false);
+            };
+
+            const saveReports = async (newReports) => {
+                setReports(newReports);
+                try {
+                    await window.storage.set('dilapidation-reports', JSON.stringify(newReports));
+                } catch (error) {
+                    console.error('Failed to save reports:', error);
+                }
+            };
+
+            const saveTasks = async (newTasks) => {
+                setTasks(newTasks);
+                try {
+                    await window.storage.set('dilapidation-tasks', JSON.stringify(newTasks));
+                } catch (error) {
+                    console.error('Failed to save tasks:', error);
+                }
+            };
+
+            const addReport = (report) => {
+                const newReports = [...reports, report];
+                saveReports(newReports);
+            };
+
+            const updateReport = (reportId, updates) => {
+                const newReports = reports.map(r => 
+                    r.id === reportId ? { ...r, ...updates } : r
+                );
+                saveReports(newReports);
+            };
+
+            const deleteReport = (reportId) => {
+                const newReports = reports.filter(r => r.id !== reportId);
+                saveReports(newReports);
+            };
+
+            const addTask = (task) => {
+                const newTasks = [...tasks, { ...task, id: Date.now().toString() }];
+                saveTasks(newTasks);
+            };
+
+            const updateTask = (taskId, updates) => {
+                const newTasks = tasks.map(t => 
+                    t.id === taskId ? { ...t, ...updates } : t
+                );
+                saveTasks(newTasks);
+            };
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
+                            <p className="text-gray-600">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    <Navigation 
+                        currentView={currentView} 
+                        setCurrentView={setCurrentView}
+                        setCurrentReport={setCurrentReport}
+                    />
+                    
+                    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        {currentView === 'dashboard' && (
+                            <Dashboard 
+                                reports={reports}
+                                tasks={tasks}
+                                setCurrentView={setCurrentView}
+                                setCurrentReport={setCurrentReport}
+                            />
+                        )}
+                        
+                        {currentView === 'new-report' && (
+                            <ReportForm 
+                                addReport={addReport}
+                                setCurrentView={setCurrentView}
+                            />
+                        )}
+                        
+                        {currentView === 'reports' && (
+                            <ReportsRegister 
+                                reports={reports}
+                                setCurrentView={setCurrentView}
+                                setCurrentReport={setCurrentReport}
+                                updateReport={updateReport}
+                                deleteReport={deleteReport}
+                            />
+                        )}
+                        
+                        {currentView === 'report-detail' && currentReport && (
+                            <ReportDetail 
+                                report={currentReport}
+                                setCurrentView={setCurrentView}
+                                updateReport={updateReport}
+                                addTask={addTask}
+                            />
+                        )}
+                        
+                        {currentView === 'tasks' && (
+                            <TasksView 
+                                tasks={tasks}
+                                reports={reports}
+                                updateTask={updateTask}
+                            />
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        // Navigation Component
+        function Navigation({ currentView, setCurrentView, setCurrentReport }) {
+            const navItems = [
+                { id: 'dashboard', label: 'Dashboard', icon: 'fa-chart-line' },
+                { id: 'new-report', label: 'New Report', icon: 'fa-plus-circle' },
+                { id: 'reports', label: 'Reports', icon: 'fa-folder-open' },
+                { id: 'tasks', label: 'Tasks', icon: 'fa-tasks' }
+            ];
+
+            return (
+                <nav className="bg-white shadow-md">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                        <div className="flex justify-between h-16">
+                            <div className="flex items-center">
+                                <i className="fas fa-hard-hat text-3xl text-blue-600 mr-3"></i>
+                                <h1 className="text-2xl font-bold text-gray-900">Dilapidation Survey Pro</h1>
+                            </div>
+                            <div className="flex space-x-1">
+                                {navItems.map(item => (
+                                    <button
+                                        key={item.id}
+                                        onClick={() => {
+                                            setCurrentView(item.id);
+                                            if (item.id !== 'report-detail') {
+                                                setCurrentReport(null);
+                                            }
+                                        }}
+                                        className={`px-4 py-2 rounded-lg transition-colors ${
+                                            currentView === item.id
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-gray-700 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <i className={`fas ${item.icon} mr-2`}></i>
+                                        <span className="hidden sm:inline">{item.label}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </nav>
+            );
+        }
+
+        // Dashboard Component
+        function Dashboard({ reports, tasks, setCurrentView, setCurrentReport }) {
+            const recentReports = [...reports].sort((a, b) => 
+                new Date(b.createdAt) - new Date(a.createdAt)
+            ).slice(0, 5);
+
+            const pendingTasks = tasks.filter(t => t.status !== 'completed');
+            
+            const stats = {
+                total: reports.length,
+                thisMonth: reports.filter(r => {
+                    const reportDate = new Date(r.createdAt);
+                    const now = new Date();
+                    return reportDate.getMonth() === now.getMonth() && 
+                           reportDate.getFullYear() === now.getFullYear();
+                }).length,
+                critical: reports.filter(r => r.severity === 'critical').length,
+                pending: pendingTasks.length
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-3xl font-bold text-gray-900">Dashboard</h2>
+                        <button
+                            onClick={() => setCurrentView('new-report')}
+                            className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        >
+                            <i className="fas fa-plus mr-2"></i>
+                            New Report
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <StatCard 
+                            title="Total Reports" 
+                            value={stats.total} 
+                            icon="fa-file-alt"
+                            color="blue"
+                        />
+                        <StatCard 
+                            title="This Month" 
+                            value={stats.thisMonth} 
+                            icon="fa-calendar"
+                            color="green"
+                        />
+                        <StatCard 
+                            title="Critical Issues" 
+                            value={stats.critical} 
+                            icon="fa-exclamation-triangle"
+                            color="red"
+                        />
+                        <StatCard 
+                            title="Pending Tasks" 
+                            value={stats.pending} 
+                            icon="fa-tasks"
+                            color="yellow"
+                        />
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        <div className="flex items-start gap-3">
+                            <i className="fas fa-info-circle text-blue-600 text-xl mt-1"></i>
+                            <div>
+                                <h4 className="font-semibold text-blue-900 mb-1">Data Storage Information</h4>
+                                <p className="text-sm text-blue-800">
+                                    All your reports, photos, and tasks are stored securely in your browser's local storage. 
+                                    Your data persists across sessions and is only accessible from this device and browser. 
+                                    To backup your data, export reports as PDFs or use browser data export tools.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-xl font-semibold mb-4 text-gray-900">Recent Reports</h3>
+                            {recentReports.length === 0 ? (
+                                <p className="text-gray-500 text-center py-8">No reports yet. Create your first report!</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {recentReports.map(report => (
+                                        <div 
+                                            key={report.id}
+                                            className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                                            onClick={() => {
+                                                setCurrentReport(report);
+                                                setCurrentView('report-detail');
+                                            }}
+                                        >
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-semibold text-gray-900">{report.id}</p>
+                                                    <p className="text-sm text-gray-600">{report.propertyAddress}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">{formatDate(report.createdAt)}</p>
+                                                </div>
+                                                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                                    report.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                                                    report.severity === 'major' ? 'bg-orange-100 text-orange-800' :
+                                                    'bg-yellow-100 text-yellow-800'
+                                                }`}>
+                                                    {report.severity}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-xl font-semibold mb-4 text-gray-900">Pending Tasks</h3>
+                            {pendingTasks.length === 0 ? (
+                                <p className="text-gray-500 text-center py-8">No pending tasks</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {pendingTasks.slice(0, 5).map(task => (
+                                        <div 
+                                            key={task.id}
+                                            className="p-4 border border-gray-200 rounded-lg"
+                                        >
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-semibold text-gray-900">{task.title}</p>
+                                                    <p className="text-sm text-gray-600">{task.assignedTo}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">Due: {formatDate(task.dueDate)}</p>
+                                                </div>
+                                                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                                    task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                                                    task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                                    'bg-green-100 text-green-800'
+                                                }`}>
+                                                    {task.priority}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Stat Card Component
+        function StatCard({ title, value, icon, color }) {
+            const colorClasses = {
+                blue: 'bg-blue-500',
+                green: 'bg-green-500',
+                red: 'bg-red-500',
+                yellow: 'bg-yellow-500'
+            };
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-sm text-gray-600 mb-1">{title}</p>
+                            <p className="text-3xl font-bold text-gray-900">{value}</p>
+                        </div>
+                        <div className={`${colorClasses[color]} w-12 h-12 rounded-lg flex items-center justify-center`}>
+                            <i className={`fas ${icon} text-white text-xl`}></i>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Report Form Component
+        function ReportForm({ addReport, setCurrentView }) {
+            const [formData, setFormData] = useState({
+                propertyAddress: '',
+                propertyType: 'residential',
+                inspectorName: '',
+                inspectorEmail: '',
+                clientName: '',
+                clientContact: '',
+                severity: 'minor',
+                weatherConditions: '',
+                areas: []
+            });
+
+            const [currentArea, setCurrentArea] = useState({
+                name: '',
+                description: '',
+                condition: 'good',
+                photos: []
+            });
+
+            const fileInputRef = useRef(null);
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleAreaChange = (e) => {
+                const { name, value } = e.target;
+                setCurrentArea(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handlePhotoUpload = (e) => {
+                const files = Array.from(e.target.files);
+                files.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        setCurrentArea(prev => ({
+                            ...prev,
+                            photos: [...prev.photos, {
+                                data: event.target.result,
+                                name: file.name,
+                                timestamp: new Date().toISOString()
+                            }]
+                        }));
+                    };
+                    reader.readAsDataURL(file);
+                });
+            };
+
+            const addArea = () => {
+                if (currentArea.name && currentArea.description) {
+                    setFormData(prev => ({
+                        ...prev,
+                        areas: [...prev.areas, { ...currentArea, id: Date.now().toString() }]
+                    }));
+                    setCurrentArea({
+                        name: '',
+                        description: '',
+                        condition: 'good',
+                        photos: []
+                    });
+                }
+            };
+
+            const removeArea = (areaId) => {
+                setFormData(prev => ({
+                    ...prev,
+                    areas: prev.areas.filter(a => a.id !== areaId)
+                }));
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                
+                const report = {
+                    ...formData,
+                    id: generateReportId(),
+                    createdAt: new Date().toISOString(),
+                    status: 'completed'
+                };
+
+                addReport(report);
+                setCurrentView('reports');
+            };
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h2 className="text-2xl font-bold text-gray-900 mb-6">New Dilapidation Report</h2>
+                    
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Property Address *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="propertyAddress"
+                                    value={formData.propertyAddress}
+                                    onChange={handleChange}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="123 Main St, Sydney NSW 2000"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Property Type *
+                                </label>
+                                <select
+                                    name="propertyType"
+                                    value={formData.propertyType}
+                                    onChange={handleChange}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    <option value="residential">Residential</option>
+                                    <option value="commercial">Commercial</option>
+                                    <option value="industrial">Industrial</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Inspector Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    name="inspectorName"
+                                    value={formData.inspectorName}
+                                    onChange={handleChange}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Inspector Email *
+                                </label>
+                                <input
+                                    type="email"
+                                    name="inspectorEmail"
+                                    value={formData.inspectorEmail}
+                                    onChange={handleChange}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Client Name
+                                </label>
+                                <input
+                                    type="text"
+                                    name="clientName"
+                                    value={formData.clientName}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Client Contact
+                                </label>
+                                <input
+                                    type="text"
+                                    name="clientContact"
+                                    value={formData.clientContact}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Overall Severity *
+                                </label>
+                                <select
+                                    name="severity"
+                                    value={formData.severity}
+                                    onChange={handleChange}
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    <option value="minor">Minor</option>
+                                    <option value="major">Major</option>
+                                    <option value="critical">Critical</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                    Weather Conditions
+                                </label>
+                                <input
+                                    type="text"
+                                    name="weatherConditions"
+                                    value={formData.weatherConditions}
+                                    onChange={handleChange}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="e.g., Clear, 22°C"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="border-t pt-6">
+                            <h3 className="text-xl font-semibold text-gray-900 mb-4">Add Inspection Areas</h3>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Area Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        value={currentArea.name}
+                                        onChange={handleAreaChange}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="e.g., Living Room, Exterior Wall"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Condition
+                                    </label>
+                                    <select
+                                        name="condition"
+                                        value={currentArea.condition}
+                                        onChange={handleAreaChange}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    >
+                                        <option value="good">Good</option>
+                                        <option value="fair">Fair</option>
+                                        <option value="poor">Poor</option>
+                                        <option value="critical">Critical</option>
+                                    </select>
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Description
+                                    </label>
+                                    <textarea
+                                        name="description"
+                                        value={currentArea.description}
+                                        onChange={handleAreaChange}
+                                        rows="3"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Describe the condition and any issues found..."
+                                    />
+                                </div>
+
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                        Photos
+                                    </label>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        capture="environment"
+                                        multiple
+                                        onChange={handlePhotoUpload}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    />
+                                    <p className="text-xs text-gray-500 mt-2">
+                                        <i className="fas fa-camera mr-1"></i>
+                                        On mobile devices, you can take photos directly or choose from your photo library
+                                    </p>
+                                    
+                                    {currentArea.photos.length > 0 && (
+                                        <div className="mt-3 grid grid-cols-3 gap-2">
+                                            {currentArea.photos.map((photo, idx) => (
+                                                <div key={idx} className="relative">
+                                                    <img 
+                                                        src={photo.data} 
+                                                        alt={photo.name}
+                                                        className="w-full h-24 object-cover rounded"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setCurrentArea(prev => ({
+                                                                ...prev,
+                                                                photos: prev.photos.filter((_, i) => i !== idx)
+                                                            }));
+                                                        }}
+                                                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={addArea}
+                                disabled={!currentArea.name || !currentArea.description}
+                                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                            >
+                                <i className="fas fa-plus mr-2"></i>
+                                Add Area
+                            </button>
+
+                            {formData.areas.length > 0 && (
+                                <div className="mt-6">
+                                    <h4 className="font-semibold text-gray-900 mb-3">Added Areas ({formData.areas.length})</h4>
+                                    <div className="space-y-3">
+                                        {formData.areas.map(area => (
+                                            <div key={area.id} className="p-4 border border-gray-200 rounded-lg">
+                                                <div className="flex justify-between items-start">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-3 mb-2">
+                                                            <h5 className="font-semibold text-gray-900">{area.name}</h5>
+                                                            <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                                                area.condition === 'critical' ? 'bg-red-100 text-red-800' :
+                                                                area.condition === 'poor' ? 'bg-orange-100 text-orange-800' :
+                                                                area.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' :
+                                                                'bg-green-100 text-green-800'
+                                                            }`}>
+                                                                {area.condition}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm text-gray-600 mb-2">{area.description}</p>
+                                                        {area.photos.length > 0 && (
+                                                            <p className="text-xs text-gray-500">
+                                                                <i className="fas fa-camera mr-1"></i>
+                                                                {area.photos.length} photo(s)
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeArea(area.id)}
+                                                        className="ml-4 text-red-600 hover:text-red-800"
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex justify-end gap-4 pt-6 border-t">
+                            <button
+                                type="button"
+                                onClick={() => setCurrentView('dashboard')}
+                                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            >
+                                <i className="fas fa-save mr-2"></i>
+                                Save Report
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            );
+        }
+
+        // Reports Register Component
+        function ReportsRegister({ reports, setCurrentView, setCurrentReport, updateReport, deleteReport }) {
+            const [filter, setFilter] = useState('all');
+            const [searchTerm, setSearchTerm] = useState('');
+
+            const filteredReports = reports.filter(report => {
+                const matchesFilter = filter === 'all' || report.severity === filter;
+                const matchesSearch = searchTerm === '' || 
+                    report.propertyAddress.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    report.id.toLowerCase().includes(searchTerm.toLowerCase());
+                return matchesFilter && matchesSearch;
+            });
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900">Reports Register</h2>
+                        <button
+                            onClick={() => setCurrentView('new-report')}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                        >
+                            <i className="fas fa-plus mr-2"></i>
+                            New Report
+                        </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                        <input
+                            type="text"
+                            placeholder="Search by address or ID..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <select
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        >
+                            <option value="all">All Severities</option>
+                            <option value="minor">Minor</option>
+                            <option value="major">Major</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+
+                    {filteredReports.length === 0 ? (
+                        <div className="text-center py-12">
+                            <i className="fas fa-folder-open text-6xl text-gray-300 mb-4"></i>
+                            <p className="text-gray-500">No reports found</p>
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">ID</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Property</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Type</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Inspector</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Date</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Severity</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Areas</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {filteredReports.map(report => (
+                                        <tr key={report.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{report.id}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{report.propertyAddress}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600 capitalize">{report.propertyType}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{report.inspectorName}</td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">
+                                                {new Date(report.createdAt).toLocaleDateString()}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                                    report.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                                                    report.severity === 'major' ? 'bg-orange-100 text-orange-800' :
+                                                    'bg-yellow-100 text-yellow-800'
+                                                }`}>
+                                                    {report.severity}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-600">{report.areas.length}</td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => {
+                                                            setCurrentReport(report);
+                                                            setCurrentView('report-detail');
+                                                        }}
+                                                        className="text-blue-600 hover:text-blue-800"
+                                                        title="View Details"
+                                                    >
+                                                        <i className="fas fa-eye"></i>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            if (confirm('Are you sure you want to delete this report?')) {
+                                                                deleteReport(report.id);
+                                                            }
+                                                        }}
+                                                        className="text-red-600 hover:text-red-800"
+                                                        title="Delete"
+                                                    >
+                                                        <i className="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Report Detail Component
+        function ReportDetail({ report, setCurrentView, updateReport, addTask }) {
+            const [showTaskForm, setShowTaskForm] = useState(false);
+            const [taskForm, setTaskForm] = useState({
+                title: '',
+                description: '',
+                assignedTo: '',
+                priority: 'medium',
+                dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+            });
+
+            const generatePDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                
+                let yPos = 20;
+                
+                doc.setFontSize(20);
+                doc.setFont(undefined, 'bold');
+                doc.text('DILAPIDATION REPORT', 105, yPos, { align: 'center' });
+                
+                yPos += 15;
+                doc.setFontSize(12);
+                doc.setFont(undefined, 'normal');
+                doc.text(`Report ID: ${report.id}`, 20, yPos);
+                
+                yPos += 10;
+                doc.text(`Date: ${formatDate(report.createdAt)}`, 20, yPos);
+                
+                yPos += 15;
+                doc.setFont(undefined, 'bold');
+                doc.text('Property Information', 20, yPos);
+                doc.setFont(undefined, 'normal');
+                
+                yPos += 8;
+                doc.text(`Address: ${report.propertyAddress}`, 20, yPos);
+                yPos += 6;
+                doc.text(`Type: ${report.propertyType}`, 20, yPos);
+                yPos += 6;
+                doc.text(`Overall Severity: ${report.severity.toUpperCase()}`, 20, yPos);
+                
+                yPos += 12;
+                doc.setFont(undefined, 'bold');
+                doc.text('Inspector Details', 20, yPos);
+                doc.setFont(undefined, 'normal');
+                
+                yPos += 8;
+                doc.text(`Name: ${report.inspectorName}`, 20, yPos);
+                yPos += 6;
+                doc.text(`Email: ${report.inspectorEmail}`, 20, yPos);
+                
+                if (report.clientName) {
+                    yPos += 12;
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Client Details', 20, yPos);
+                    doc.setFont(undefined, 'normal');
+                    yPos += 8;
+                    doc.text(`Name: ${report.clientName}`, 20, yPos);
+                    if (report.clientContact) {
+                        yPos += 6;
+                        doc.text(`Contact: ${report.clientContact}`, 20, yPos);
+                    }
+                }
+                
+                yPos += 15;
+                doc.setFont(undefined, 'bold');
+                doc.text('Inspection Areas', 20, yPos);
+                doc.setFont(undefined, 'normal');
+                
+                report.areas.forEach((area, index) => {
+                    yPos += 10;
+                    if (yPos > 270) {
+                        doc.addPage();
+                        yPos = 20;
+                    }
+                    
+                    doc.setFont(undefined, 'bold');
+                    doc.text(`${index + 1}. ${area.name}`, 25, yPos);
+                    doc.setFont(undefined, 'normal');
+                    yPos += 6;
+                    doc.text(`Condition: ${area.condition}`, 30, yPos);
+                    yPos += 6;
+                    
+                    const descLines = doc.splitTextToSize(area.description, 160);
+                    doc.text(descLines, 30, yPos);
+                    yPos += descLines.length * 6;
+                    
+                    if (area.photos.length > 0) {
+                        yPos += 4;
+                        doc.text(`Photos: ${area.photos.length} attached`, 30, yPos);
+                    }
+                });
+                
+                doc.save(`${report.id}_Dilapidation_Report.pdf`);
+            };
+
+            const handleCreateTask = (e) => {
+                e.preventDefault();
+                addTask({
+                    ...taskForm,
+                    reportId: report.id,
+                    status: 'pending',
+                    createdAt: new Date().toISOString()
+                });
+                setShowTaskForm(false);
+                setTaskForm({
+                    title: '',
+                    description: '',
+                    assignedTo: '',
+                    priority: 'medium',
+                    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                });
+            };
+
+            return (
+                <div className="space-y-6">
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <div className="flex justify-between items-start mb-6">
+                            <div>
+                                <h2 className="text-2xl font-bold text-gray-900">{report.id}</h2>
+                                <p className="text-gray-600">{report.propertyAddress}</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={generatePDF}
+                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                                >
+                                    <i className="fas fa-file-pdf mr-2"></i>
+                                    Export PDF
+                                </button>
+                                <button
+                                    onClick={() => setShowTaskForm(!showTaskForm)}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                >
+                                    <i className="fas fa-tasks mr-2"></i>
+                                    Create Task
+                                </button>
+                                <button
+                                    onClick={() => setCurrentView('reports')}
+                                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                                >
+                                    <i className="fas fa-arrow-left mr-2"></i>
+                                    Back
+                                </button>
+                            </div>
+                        </div>
+
+                        {showTaskForm && (
+                            <div className="mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50">
+                                <h3 className="font-semibold text-gray-900 mb-4">Create New Task</h3>
+                                <form onSubmit={handleCreateTask} className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Task Title *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={taskForm.title}
+                                                onChange={(e) => setTaskForm(prev => ({ ...prev, title: e.target.value }))}
+                                                required
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Assigned To *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={taskForm.assignedTo}
+                                                onChange={(e) => setTaskForm(prev => ({ ...prev, assignedTo: e.target.value }))}
+                                                required
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Priority
+                                            </label>
+                                            <select
+                                                value={taskForm.priority}
+                                                onChange={(e) => setTaskForm(prev => ({ ...prev, priority: e.target.value }))}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                            >
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Due Date
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={taskForm.dueDate}
+                                                onChange={(e) => setTaskForm(prev => ({ ...prev, dueDate: e.target.value }))}
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                Description
+                                            </label>
+                                            <textarea
+                                                value={taskForm.description}
+                                                onChange={(e) => setTaskForm(prev => ({ ...prev, description: e.target.value }))}
+                                                rows="3"
+                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowTaskForm(false)}
+                                            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                                        >
+                                            Create Task
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <div>
+                                <h3 className="font-semibold text-gray-900 mb-3">Property Details</h3>
+                                <dl className="space-y-2">
+                                    <div>
+                                        <dt className="text-sm text-gray-600">Type</dt>
+                                        <dd className="text-sm font-medium text-gray-900 capitalize">{report.propertyType}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-sm text-gray-600">Severity</dt>
+                                        <dd>
+                                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                                report.severity === 'critical' ? 'bg-red-100 text-red-800' :
+                                                report.severity === 'major' ? 'bg-orange-100 text-orange-800' :
+                                                'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {report.severity}
+                                            </span>
+                                        </dd>
+                                    </div>
+                                    {report.weatherConditions && (
+                                        <div>
+                                            <dt className="text-sm text-gray-600">Weather</dt>
+                                            <dd className="text-sm font-medium text-gray-900">{report.weatherConditions}</dd>
+                                        </div>
+                                    )}
+                                </dl>
+                            </div>
+                            
+                            <div>
+                                <h3 className="font-semibold text-gray-900 mb-3">Inspector & Client</h3>
+                                <dl className="space-y-2">
+                                    <div>
+                                        <dt className="text-sm text-gray-600">Inspector</dt>
+                                        <dd className="text-sm font-medium text-gray-900">{report.inspectorName}</dd>
+                                        <dd className="text-sm text-gray-600">{report.inspectorEmail}</dd>
+                                    </div>
+                                    {report.clientName && (
+                                        <div>
+                                            <dt className="text-sm text-gray-600">Client</dt>
+                                            <dd className="text-sm font-medium text-gray-900">{report.clientName}</dd>
+                                            {report.clientContact && (
+                                                <dd className="text-sm text-gray-600">{report.clientContact}</dd>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <dt className="text-sm text-gray-600">Created</dt>
+                                        <dd className="text-sm font-medium text-gray-900">{formatDate(report.createdAt)}</dd>
+                                    </div>
+                                </dl>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="font-semibold text-gray-900 mb-4">
+                                Inspection Areas ({report.areas.length})
+                            </h3>
+                            <div className="space-y-4">
+                                {report.areas.map((area, index) => (
+                                    <div key={area.id} className="border border-gray-200 rounded-lg p-4">
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div>
+                                                <h4 className="font-semibold text-gray-900">
+                                                    {index + 1}. {area.name}
+                                                </h4>
+                                            </div>
+                                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                                area.condition === 'critical' ? 'bg-red-100 text-red-800' :
+                                                area.condition === 'poor' ? 'bg-orange-100 text-orange-800' :
+                                                area.condition === 'fair' ? 'bg-yellow-100 text-yellow-800' :
+                                                'bg-green-100 text-green-800'
+                                            }`}>
+                                                {area.condition}
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-600 mb-3">{area.description}</p>
+                                        {area.photos.length > 0 && (
+                                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                                {area.photos.map((photo, photoIdx) => (
+                                                    <div key={photoIdx} className="relative group">
+                                                        <img 
+                                                            src={photo.data} 
+                                                            alt={photo.name}
+                                                            className="w-full h-32 object-cover rounded cursor-pointer hover:opacity-90"
+                                                            onClick={() => window.open(photo.data)}
+                                                        />
+                                                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 rounded-b opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            {new Date(photo.timestamp).toLocaleString()}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Tasks View Component
+        function TasksView({ tasks, reports, updateTask }) {
+            const [filter, setFilter] = useState('pending');
+
+            const filteredTasks = tasks.filter(task => {
+                if (filter === 'all') return true;
+                return task.status === filter;
+            });
+
+            const getReportInfo = (reportId) => {
+                return reports.find(r => r.id === reportId);
+            };
+
+            const toggleTaskStatus = (taskId, currentStatus) => {
+                const newStatus = currentStatus === 'completed' ? 'pending' : 'completed';
+                updateTask(taskId, { status: newStatus });
+            };
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900">Tasks</h2>
+                        <select
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="all">All Tasks</option>
+                            <option value="pending">Pending</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
+
+                    {filteredTasks.length === 0 ? (
+                        <div className="text-center py-12">
+                            <i className="fas fa-tasks text-6xl text-gray-300 mb-4"></i>
+                            <p className="text-gray-500">No tasks found</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {filteredTasks.map(task => {
+                                const reportInfo = getReportInfo(task.reportId);
+                                return (
+                                    <div 
+                                        key={task.id} 
+                                        className={`border rounded-lg p-4 ${
+                                            task.status === 'completed' ? 'bg-gray-50 border-gray-200' : 'border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-4">
+                                            <input
+                                                type="checkbox"
+                                                checked={task.status === 'completed'}
+                                                onChange={() => toggleTaskStatus(task.id, task.status)}
+                                                className="mt-1 w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                                            />
+                                            <div className="flex-1">
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <h3 className={`font-semibold text-gray-900 ${
+                                                        task.status === 'completed' ? 'line-through' : ''
+                                                    }`}>
+                                                        {task.title}
+                                                    </h3>
+                                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                                        task.priority === 'high' ? 'bg-red-100 text-red-800' :
+                                                        task.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                                        'bg-green-100 text-green-800'
+                                                    }`}>
+                                                        {task.priority}
+                                                    </span>
+                                                </div>
+                                                {task.description && (
+                                                    <p className="text-sm text-gray-600 mb-2">{task.description}</p>
+                                                )}
+                                                <div className="flex flex-wrap gap-4 text-sm text-gray-500">
+                                                    <span>
+                                                        <i className="fas fa-user mr-1"></i>
+                                                        {task.assignedTo}
+                                                    </span>
+                                                    <span>
+                                                        <i className="fas fa-calendar mr-1"></i>
+                                                        Due: {new Date(task.dueDate).toLocaleDateString()}
+                                                    </span>
+                                                    {reportInfo && (
+                                                        <span>
+                                                            <i className="fas fa-file-alt mr-1"></i>
+                                                            {reportInfo.id}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Render the app
+        ReactDOM.render(<DilapidationApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
